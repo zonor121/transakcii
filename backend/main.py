@@ -1,17 +1,16 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from typing import Optional
-from decimal import Decimal
 import os
 
-# Импортируем твой рабочий клиент
 from shop_client import FlowerShopClient, TransferType, TransferResult
 
-app = FastAPI(title="Магазин 'Ромашка'")
+app = FastAPI(title="Магазин 'Ромашка' API")
 
-# Разрешаем запросы (на случай если откроешь html отдельно)
+# Разрешаем запросы с любого источника (для локальной разработки)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -20,7 +19,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Подключаем папку static для раздачи фронтенда
+# Настройка раздачи статических файлов
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -34,12 +33,12 @@ class TransferRequest(BaseModel):
     amount: float = Field(gt=0)
     transfer_type: str
     description: Optional[str] = None
+    force_fail: bool = False  # Флаг для имитации сбоя БД
 
 
 @app.get("/")
 async def root():
-    """Отдаёт index.html при заходе на localhost:8000"""
-    from fastapi.responses import FileResponse
+    """Отдаёт index.html при заходе на корень"""
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 
@@ -58,7 +57,7 @@ async def create_transfer(req: TransferRequest):
     try:
         t_type = TransferType(req.transfer_type)
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"Невалидный тип: {req.transfer_type}")
+        raise HTTPException(status_code=400, detail=f"Невалидный тип перевода: {req.transfer_type}")
 
     result: TransferResult = shop.transfer(
         from_id=req.from_id,
@@ -66,6 +65,7 @@ async def create_transfer(req: TransferRequest):
         amount=req.amount,
         transfer_type=t_type,
         description=req.description,
+        force_fail=req.force_fail,
     )
 
     if not result.success:

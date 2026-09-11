@@ -104,6 +104,13 @@
         <div class="row">
             <input type="number" id="amount" placeholder="Сумма ₽" step="0.01" min="0.01">
             <select id="type"><option value="SALARY">Зарплата</option><option value="PAYMENT">Оплата</option></select>
+            <!-- ВСТАВИТЬ ПЕРЕД <button id="btn"> -->
+    <div style="margin-bottom:1rem; display:flex; align-items:center; gap:8px;">
+    <input type="checkbox" id="force-fail" style="width:auto;">
+    <label for="force-fail" style="font-size:0.875rem; color:#64748b; cursor:pointer;">
+        ☑️ Имитировать сбой БД (тест ROLLBACK)
+    </label>
+    </div>
         </div>
         <input type="text" id="desc" placeholder="Описание" style="margin-bottom:1rem">
         <button id="btn" onclick="send()">Выполнить перевод</button>
@@ -250,58 +257,79 @@ function animateMoneyTransfer(fromId, toId, amount, onSuccess) {
 
 async function send() {
     const btn = document.getElementById('btn');
-    const fromId = document.getElementById('from').value;
-    const toId = document.getElementById('to').value;
-    const amount = parseFloat(document.getElementById('amount').value);
+    const fromEl = document.getElementById('from');
+    const toEl = document.getElementById('to');
+    const amountEl = document.getElementById('amount');
+    const typeEl = document.getElementById('type');
+    const descEl = document.getElementById('desc');
+    const failEl = document.getElementById('force-fail'); // Убедись, что ID совпадает с HTML
+
+    // Защита от отсутствия элементов
+    if (!fromEl || !toEl || !amountEl || !failEl) {
+        console.error("Не найдены элементы формы! Проверь ID в HTML.");
+        return toast('Ошибка интерфейса', 'err');
+    }
+
+    const fromId = fromEl.value;
+    const toId = toEl.value;
+    const amount = parseFloat(amountEl.value);
+    const forceFail = failEl.checked; // Читаем состояние чекбокса
+
+    console.log("Отправка данных:", { fromId, toId, amount, forceFail }); // Отладка
 
     const data = {
-        from_id: fromId, to_id: toId, amount,
-        transfer_type: document.getElementById('type').value,
-        description: document.getElementById('desc').value || null
+        from_id: fromId,
+        to_id: toId,
+        amount: amount,
+        transfer_type: typeEl.value,
+        description: descEl.value || null,
+        force_fail: forceFail // ← Критически важное поле
     };
 
     if (!data.from_id || !data.to_id || !data.amount) return toast('Заполните все поля', 'err');
     if (data.from_id === data.to_id) return toast('Нельзя перевести себе', 'err');
 
-    // 🔒 Блокируем интерфейс и показываем статус транзакции
     btn.disabled = true;
-    btn.textContent = 'Фиксация транзакции...';
-    setGlobalTxStatus('processing', '⏳ Фиксация транзакции в БД...');
+    btn.textContent = forceFail ? 'Имитация сбоя...' : 'Фиксация транзакции...';
+    
+    setGlobalTxStatus('processing', forceFail ? '⚠️ Имитация сбоя БД...' : '⏳ Фиксация транзакции в БД...');
     setCardTxStatus(fromId, 'pending');
     setCardTxStatus(toId, 'pending');
 
     try {
         const res = await fetch('/api/transfer', {
-            method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(data)
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
         });
+        
         const json = await res.json();
+        console.log("Ответ сервера:", json); // Отладка ответа
 
-        if (res.ok) {
-            // ✅ УСПЕХ: запускаем анимацию, потом обновляем данные
-            animateMoneyTransfer(fromId, toId, amount, () => {
+        if (res.ok && json.status !== 'FAILED') { // Доп. проверка на случай если бэк вернул 200 но с ошибкой
+             animateMoneyTransfer(fromId, toId, amount, () => {
                 setGlobalTxStatus('done', '✅ Транзакция зафиксирована (COMMIT)');
                 setCardTxStatus(fromId, 'success');
                 setCardTxStatus(toId, 'success');
                 toast(json.message, 'ok');
-                
-                document.getElementById('amount').value = '';
-                document.getElementById('desc').value = '';
-                
-                // Обновляем балансы ПОСЛЕ анимации
+                amountEl.value = '';
+                descEl.value = '';
                 setTimeout(() => load(), 400);
             });
         } else {
-            // ❌ ОТКАТ: показываем ошибку, балансы НЕ меняются
-            setGlobalTxStatus('error', `❌ Откат транзакции (ROLLBACK): ${json.detail}`);
-            setCardTxStatus(fromId, 'failed', json.detail);
-            setCardTxStatus(toId, 'failed', json.detail);
-            toast(json.detail || 'Ошибка транзакции', 'err');
+            // Обработка ошибки (включая ROLLBACK)
+            const errMsg = json.detail || json.message || 'Ошибка транзакции';
+            setGlobalTxStatus('error', `❌ ROLLBACK: ${errMsg}`);
+            setCardTxStatus(fromId, 'failed', 'Откат');
+            setCardTxStatus(toId, 'failed', 'Откат');
+            toast(errMsg, 'err');
+            setTimeout(() => load(), 1000);
         }
     } catch (e) {
-        setGlobalTxStatus('error', '❌ Сетевая ошибка — транзакция не выполнена');
+        console.error(e);
+        setGlobalTxStatus('error', '❌ Сетевая ошибка');
         toast('Сетевая ошибка', 'err');
     } finally {
-        // Разблокируем кнопку через 3 сек (после скрытия индикаторов)
         setTimeout(() => {
             btn.disabled = false;
             btn.textContent = 'Выполнить перевод';
