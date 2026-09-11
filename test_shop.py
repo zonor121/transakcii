@@ -1,4 +1,4 @@
-from shop_client import FlowerShopClient, TransferType
+from backend.shop_client import FlowerShopClient, TransferType
 
 
 def main():

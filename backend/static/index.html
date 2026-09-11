@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🌼 Магазин "Ромашка"</title>
+    <style>
+        :root { --primary: #10b981; --bg: #f8fafc; --card: #fff; --text: #1e293b; --border: #e2e8f0; }
+        body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 2rem; }
+        .container { max-width: 900px; margin: 0 auto; }
+        h1 { text-align: center; }
+        
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 2rem 0; }
+        .card { background: var(--card); border-radius: 12px; padding: 1.5rem; border: 1px solid var(--border); text-align: center; }
+        .balance-val { font-size: 1.8rem; font-weight: bold; color: var(--primary); margin: 0.5rem 0; }
+        .role-badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 0.75rem; background: #f1f5f9; font-weight: 600; }
+        
+        .form-box { background: var(--card); padding: 2rem; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 2rem; }
+        .row { display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+        select, input { width: 100%; padding: 0.75rem; border: 1px solid var(--border); border-radius: 8px; font-size: 1rem; box-sizing: border-box; }
+        button { width: 100%; padding: 0.75rem; background: var(--primary); color: #fff; border: none; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; }
+        button:disabled { opacity: 0.6; cursor: not-allowed; }
+        
+        table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 12px; overflow: hidden; border: 1px solid var(--border); }
+        th, td { padding: 1rem; text-align: left; border-bottom: 1px solid var(--border); }
+        th { background: #f1f5f9; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        .ok { color: var(--primary); font-weight: 600; }
+        .err { color: #ef4444; font-weight: 600; }
+        
+        #toast { position: fixed; bottom: 2rem; right: 2rem; padding: 1rem 1.5rem; border-radius: 8px; color: #fff; font-weight: 500; transform: translateY(100px); opacity: 0; transition: all 0.3s; z-index: 100; }
+        #toast.show { transform: translateY(0); opacity: 1; }
+        #toast.ok { background: var(--primary); }
+        #toast.err { background: #ef4444; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>🌼 Магазин цветов "Ромашка"</h1>
+    
+    <div id="balances" class="grid"></div>
+    
+    <div class="form-box">
+        <h3 style="margin-top:0">💸 Новый перевод</h3>
+        <div class="row">
+            <select id="from"><option value="">Отправитель</option></select>
+            <select id="to"><option value="">Получатель</option></select>
+        </div>
+        <div class="row">
+            <input type="number" id="amount" placeholder="Сумма ₽" step="0.01" min="0.01">
+            <select id="type"><option value="SALARY">Зарплата</option><option value="PAYMENT">Оплата</option></select>
+        </div>
+        <input type="text" id="desc" placeholder="Описание" style="margin-bottom:1rem">
+        <button id="btn" onclick="send()">Выполнить перевод</button>
+    </div>
+    
+    <h3>📜 История</h3>
+    <table>
+        <thead><tr><th>Дата</th><th>Тип</th><th>От → Кому</th><th>Сумма</th><th>Статус</th></tr></thead>
+        <tbody id="hist"></tbody>
+    </table>
+</div>
+<div id="toast"></div>
+
+<script>
+const API = ''; // Относительный путь, т.к. хостимся на том же домене
+
+async function load() {
+    const [p, h] = await Promise.all([
+        fetch('/api/participants').then(r => r.json()),
+        fetch('/api/transfers?limit=50').then(r => r.json())
+    ]);
+    
+    // Рендер балансов
+    const grid = document.getElementById('balances');
+    const fromSel = document.getElementById('from');
+    const toSel = document.getElementById('to');
+    grid.innerHTML = '';
+    fromSel.innerHTML = '<option value="">Отправитель</option>';
+    toSel.innerHTML = '<option value="">Получатель</option>';
+    
+    let total = 0;
+    p.forEach(x => {
+        total += parseFloat(x.balance);
+        grid.innerHTML += `<div class="card">
+            <span class="role-badge">${x.role}</span>
+            <div style="font-weight:600;margin:.5rem 0">${x.name}</div>
+            <div class="balance-val">${parseFloat(x.balance).toLocaleString('ru-RU',{minimumFractionDigits:2})} ₽</div>
+        </div>`;
+        fromSel.innerHTML += `<option value="${x.id}">${x.name}</option>`;
+        toSel.innerHTML += `<option value="${x.id}">${x.name}</option>`;
+    });
+    
+    // Карточка общей массы
+    grid.innerHTML += `<div class="card" style="background:#ecfdf5;border-color:#a7f3d0">
+        <span class="role-badge" style="background:#d1fae5;color:#065f46">СИСТЕМА</span>
+        <div style="font-weight:600;margin:.5rem 0">Общая масса денег</div>
+        <div class="balance-val" style="color:#059669">${total.toLocaleString('ru-RU',{minimumFractionDigits:2})} ₽</div>
+    </div>`;
+    
+    // Рендер истории
+    document.getElementById('hist').innerHTML = h.map(t => {
+        const d = new Date(t.created_at).toLocaleString('ru-RU', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+        const a = parseFloat(t.amount).toLocaleString('ru-RU',{minimumFractionDigits:2});
+        const cls = t.status === 'SUCCESS' ? 'ok' : 'err';
+        return `<tr><td>${d}</td><td>${t.type}</td><td>${t.from?.name||'?'} → ${t.to?.name||'?'}</td><td>${a} ₽</td><td class="${cls}">${t.status}</td></tr>`;
+    }).join('');
+}
+
+async function send() {
+    const btn = document.getElementById('btn');
+    const data = {
+        from_id: document.getElementById('from').value,
+        to_id: document.getElementById('to').value,
+        amount: parseFloat(document.getElementById('amount').value),
+        transfer_type: document.getElementById('type').value,
+        description: document.getElementById('desc').value || null
+    };
+    
+    if (!data.from_id || !data.to_id || !data.amount) return toast('Заполните все поля', 'err');
+    if (data.from_id === data.to_id) return toast('Нельзя себе', 'err');
+    
+    btn.disabled = true;
+    btn.textContent = 'Обработка...';
+    
+    try {
+        const res = await fetch('/api/transfer', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        const json = await res.json();
+        
+        if (res.ok) {
+            toast(json.message, 'ok');
+            document.getElementById('amount').value = '';
+            document.getElementById('desc').value = '';
+            await load();
+        } else {
+            toast(json.detail || 'Ошибка', 'err');
+        }
+    } catch(e) {
+        toast('Сетевая ошибка', 'err');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Выполнить перевод';
+    }
+}
+
+function toast(msg, type) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = `show ${type}`;
+    setTimeout(() => el.className = '', 3000);
+}
+
+load();
+</script>
+</body>
+</html>
